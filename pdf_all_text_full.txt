@@ -1,0 +1,305 @@
+
+--- PAGE 1 RAW TEXT ---
+NATIONAL HEAVY VEHICLE ACCREDITATION
+AUDIT SUMMARY REPORT
+Tick as appropriate
+NHVAS Mass X Entry Audit
+Maintenance Initial Compliance Audit X
+Basic Fatigue Compliance Audit
+Advanced Fatigue Spot Check
+Triggered Audit
+Audit Information
+Date of Audit 11th November 2022
+Location of audit 252 Weavers Road, Stansbury, SA, 5582
+Auditor name Jodie Jones
+Audit Matrix Identifier Simon Anderson
+(Name or Number)
+Auditor Exemplar Global Reg No. 121912 expiry Date: 07.08.2023
+NHVR Auditor Registration Number 103 expiry Date: 04.01.2025
+Operator Information
+Operator name Holland Park Nominees Pty Ltd
+(Legal entity)
+NHVAS Accreditation No. NHVAS512327
+(If applicable)
+Registered trading name/s
+Australian Company Number 0 0 8 1 5 1 2 3 7
+NHVAS Manual (Policies and CJ Enterprises, V1, 032022
+Procedures) developed by
+Operator contact details
+Operator business address 252 Weavers Road, Stansbury, SA, 5582
+Operator Postal address PO Box 177, Stansbury, SA, 5582
+Email address ilfracoombe3@bigpond.com
+Operator Telephone Number 0439 424 499
+Page 1 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 2 RAW TEXT ---
+NHVAS AUDIT SUMMARY REPORT
+Attendance List (Names and Position Titles)
+Simon Anderson - Director
+Jodie Jones - Auditor
+Nature of the Operators Business (Summary):
+Holland Park Nominees is a family run farm located in Stansbury in regional South Australia.
+It is run by Simon Anderson.
+The family harvest grain and cart it to the local silos. They crop approximately 3500 acres
+annually. The vehicle travels approximately 15,000kms each year.
+Expiry Date: 01.04.2022
+Accreditation Vehicle Summary
+Number of powered vehicles 1 Number of trailing vehicles
+Compliance Codes
+V Conformance Verified TNC Transitional Non-Conformance requiring
+rectification
+SFI Suggestion For Improvement NC Non-Conformance requiring rectification
+NA Not Assessed at this Audit NAP Not Applicable
+Corrective Action Request Identification
+Title Abbreviation Description
+A standard has not been met and requires
+Corrective action request CAR
+corrective action
+Transitional A new or changed standard has not been
+TCAR
+Corrective action request met and requires corrective action
+Page 2 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 3 RAW TEXT ---
+NHVAS AUDIT SUMMARY REPORT
+TNC type TCARs for mass management may use a conditional close out date of “by next audit”.
+MASS MANAGEMENT
+Compliance Corrective Action Conditional Unconditional
+REQUIREMENT OF
+Codes Request Number Closeout Closeout
+STANDARD
+(CAR) or (TCAR) Date Date
+Std 1. Responsibilities V
+Std 2. Vehicle Control V
+Std 3. Vehicle Use V
+Std 4. Records and V
+Documentation
+Std 5. Verification V
+Std 6. Internal Review V
+Std 7. Training and V
+Education
+Std 8. Maintenance of V
+Suspension
+Page 3 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 4 RAW TEXT ---
+AUDIT OBSERVATIONS AND COMMENTS
+MASS MANAGEMENT SUMMARY OF AUDIT FINDINGS
+Provide a summary of findings based on the evidence gathered during the audit.
+Refer to audit matrix for details of evidence that supports the opinion represented in this report.
+MASS MANAGEMENT DETAILS
+Std 1. Responsibilities All responsibilities are detailed throughout the system.
+(Review authorities, responsibilities, and Mr Anderson, as manager has responsibility to ensure
+duties for the mass management system.
+compliance with all mass procedures, ensure on
+Ensure that each is current, clearly
+board weighing equipment is tested on a regular
+defined, well documented and tasks rest
+with the appropriate people). basis, ensure vehicles are made available for regular
+maintenance, ensure all issued labels are correctly
+attached and to ensure all staff are trained in their
+responsibility to the mass system.
+The manager is also responsible to check and file all
+records, conduct reviews, maintain the vehicle list
+and record any non-conformances which may occur.
+Drivers are responsible to complete all
+documentation, ensure all routes travelled are
+gazetted and deliberately under load if any doubt
+arises.
+Compliance was of a good standard.
+Std 2. Vehicle Control A simple register of vehicles operated by the business
+(Review comprehensive register of on the mass management program is maintained by
+nominated vehicles (including sub-
+the manager as a hard copy.
+contractors) Ensure that nominated
+The vehicle list showed the allowable weights for each
+vehicles have the technical specifications
+and mass authorisations (if required) to use vehicle.
+the road network).
+The vehicles listed on the mass management program
+were suitably rated and registered to carry the
+increased weights available.
+Compliance was of a good standard.
+Page 4 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 5 RAW TEXT ---
+MASS MANAGEMENT DETAILS
+Std 3. Vehicle Use The company has detailed procedures describing the
+(Review procedures/policy, documented steps to be taken for checking of the load weights
+instructions that objectively demonstrate
+prior to departure.
+how vehicle mass is weighed/assessed
+All loads are checked either using gauges or by a
+prior to departure. The system incorporates
+provisions for ensuring axle and gross weighbridge on site when loading.
+weights are not exceeded)
+A daily workbook was sighted which allowed for all
+required details to be recorded.
+Staff had a good understanding of the required
+information to be recorded.
+It is company policy that no vehicle is permitted to
+depart overloaded under any circumstances.
+Where a vehicle has been identified to be
+overloaded a non-conformance is raised and it is
+brought to the attention of the driver.
+Compliance was of a good standard.
+Std 4. Records and Documentation One copy of the mass procedures manual is in the
+(Review availability of the documented office and available to all staff involved in the mass
+mass management system, and ensure the
+program.
+following trip records are kept and
+Mr Anderson, as the manager, is the person
+maintained:
+ Vehicle identifier responsible to check and maintain records relevant to
+ Measured weight (mass of vehicle) the mass program.
+ Register of contraventions Document and records procedures identify that the
+ Date and time of trip)
+records shall be stored for a minimum of three years.
+Records viewed on the day of the audit included:
+ Vehicle list
+ Company procedures
+ Weight records
+ Internal review and quarterly compliance forms.
+ Training records
+ Service records
+Compliance was of a good standard.
+Std 5. Verification The verification is completed by checking the gauges
+(Review procedures/policy, including against a weigh bridge.
+method used to verify weight of vehicle Procedures state that weights will be verified using a
+and load, the frequency at which
+registered weighbridge.
+verification is performed, how the
+Training records and interview confirmed staff had a
+verification process allows for different
+types of measurement methods) good understanding of the requirements.
+Compliance was of a good standard.
+Page 5 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 6 RAW TEXT ---
+MASS MANAGEMENT DETAILS
+Std 6. Internal Review Internal review and quarterly compliance procedures
+(Review procedures/policy, evidence of in the manual were detailed and easy to follow.
+completion of Compliance Statements Administration is responsible to conduct internal
+and Internal Reviews, including the
+reviews, quarterly compliances and record any non-
+number of mass breaches, records of any
+conformances.
+NCRs raised and CARs to eliminate
+recurrence) The review is to be completed every 12 months in line
+with the accreditation period – this was dated 31st
+October 2022 – no non-conformances had been
+recorded during the audit period.
+Quarterly compliance statements were available and
+the latest was dated 31st October 2022 – 28 loads at
+higher mass limits (fertiliser and grain) no overloads.
+Compliance was of a good standard.
+Std 7. Training and Education Procedures for the training of all personnel involved in
+(Review procedures/policy, the mass management program are in the manual.
+appropriateness of training, evidence of All staff have a good understanding of the mass
+training records and identification of
+management system and have training records.
+responsible person)
+Training records were available at time of audit.
+Compliance was of a good standard.
+Std 8. Maintenance of Suspension The manual has procedures explaining the
+(Review procedures/policy, documented requirements of this standard.
+evidence of:
+Relevant forms for fault recording were sighted on the
+ Suspension fault reporting/recording
+day of the audit.
+mechanism
+ Assigning priority to suspension related A daily check list is available for reference in the
+faults prime movers.
+ The person responsible for
+The company ensures the vehicle is serviced annually
+monitoring/deferring a suspension
+by an approved repairer.
+fault is identified/recorded
+ Upon completion of a suspension Mr Anderson ensures all repairs are completed and
+fault, closeout details including test tested.
+method is recorded)
+Compliance was of a good standard.
+Page 6 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 7 RAW TEXT ---
+Vehicle Registration Numbers of Records Examined
+MASS MANAGEMENT
+Holland Park Nominees Pty Ltd
+No. Registration Sub- Sub-contracted Weight RFS Suspension Suspension System Trip Records Fault Recording/
+Number contractor Vehicles Verification Certification # Maintenance Reporting on
+Statement of Records Suspension
+Compliance System
+1. XS70EW No No 01.04.22 – 31.10.22 RF2012 01.04.22 – 31.10.22 01.04.22 – 31.10.22 01.04.22 – 31.10.22
+2.
+Page 7 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 8 RAW TEXT ---
+CORRECTIVE ACTION REQUEST (CAR)
+Operator’s Name (legal entity)
+Non-conformance type (please tick)
+☐ ☐ ☐
+Un-conditional Conditional Transitional
+Non-conformance Information
+Non-conformance agreed close out date
+(Transitional CARS may use “before next audit”)
+Module and Standard
+Corrective Action Request (CAR) or (TCAR)
+Number
+Non-conformance and action taken
+Corrective Action taken or to be taken by operator:
+Operator or Position
+Representative Signature
+Date
+Corrective Action Accepted and Recommended
+Comments:
+Auditor signature Date
+Page 8 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 9 RAW TEXT ---
+NHVAS APPROVED AUDITOR DECLARATION
+Print Name NHVR or Exemplar Global
+Auditor Registration Number
+Jodie Jones 121912 / 103
+Audit was conducted on 11th November 2022
+Unconditional CARs closed out on:
+Conditional CARs to be closed out by:
+Conditional TCARs to be closed out by:
+As an NHVAS Approved Auditor currently registered with the National Heavy Vehicle
+Regulator I hereby certify that I have conducted this audit in accordance with the NHVAS
+Business Rules and Standards, and
+(print accreditation name)
+Holland Park Nominees Pty Ltd
+DOES
+_________________________ (please state “does” or “does not”) meet all the requirements
+of the NHVAS Business Rules and Standards for the modules identified in this report.
+This management system I have audited when followed will ensure compliance with the
+relevant NHVAS Business Rules & Standards.
+AUDITOR SIGNATURE ___________________________________ DATE ____11.11.2022______
+NOTE: A declaration that a system “does” meet all the requirements of the NHVAS Business
+Rules and Standards refers to the status the operator’s system would have considered to be
+in, after all CARs issued during the audit would have been closed out.
+Page 9 of 9 202102-0277 NHVAS Audit Summary Report
+
+--- PAGE 10 OCR TEXT ---
+Notionol Heavy Venicle Regulator
+
+OPERATOR DECLARATION
+
+Print Name | Position Title
+
+Risse PAweT Som, | Mawnoger
+
+| hereby acknowledge and agree with the findings detailed in this NHAVS Audit
+Summary Report. | have read and understand the conditions applicable to the
+Scheme, including the NHVAS Business Rules and Standards.
+
+The management system | have in place will ensure compliance with the
+relevant NHVAS Business Rules & Standards.
+
+| hereby consent to information relating to my Accreditation to be shared with
+other law enforcement agencies, including a service provider authorised under
+the Heavy Vehicle National Law.
+
+OPERATOR SIGNATURE Suncom Aho DATE ti /U/ 2%
+
+Page | of I 202102-0277 NHVAS Audit Summary Report

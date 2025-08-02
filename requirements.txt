@@ -1,0 +1,7 @@
+# requirements.txt
+python-docx
+camelot-py[cv]        # for digital-table parsing
+pdf2image             # for fallback OCR on images
+pytesseract
+Pillow
+rapidfuzz             # for fuzzy header matching
