@@ -1,1 +1,5 @@
+# .gitignore
 .env
+secrets.txt
+*.pyc
+__pycache__/
