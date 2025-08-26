@@ -25,3 +25,13 @@ pix2tex==0.1.4
 latex2mathml==3.78.0
 PyMuPDF==1.25.5
 git+https://github.com/huridocs/pdf-features.git@2025.7.30.1
+gradio==4.44.1
+pytesseract
+python-docx
+camelot-py[cv]        # for digital-table parsing
+pdf2image             # for fallback OCR on images
+pytesseract
+Pillow
+rapidfuzz      
+pdfplumber
+openai
