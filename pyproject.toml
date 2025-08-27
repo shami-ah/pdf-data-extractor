@@ -7,7 +7,7 @@ authors = [{ name = "HURIDOCS" }]
 requires-python = ">= 3.10"
 dependencies = [
     "fastapi==0.111.1",
-    "python-multipart==0.0.9",
+    "python-multipart==0.0.20",
     "uvicorn==0.30.3",
     "gunicorn==22.0.0",
     "requests==2.32.3",
