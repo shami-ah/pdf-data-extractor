@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Fixed PDF Data Extractor - Addresses key issues in comprehensive_extract.py
-
 Key fixes:
 1. Better table extraction and cleaning
 2. Improved key-value pair extraction
