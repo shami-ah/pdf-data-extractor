@@ -16,6 +16,65 @@ BLACK = RGBColor(0, 0, 0)
 RED = RGBColor(0xFF, 0x00, 0x00)
 
 # ----------------------------- text helpers -----------------------------
+# New function specifically for Management Summary tables
+def _set_cell_text_black_with_line_breaks(cell, text: str):
+    """Clear a table cell and insert black text with line breaks after periods (for Management Summary tables only)."""
+    # Clear all existing paragraphs completely
+    for p in list(cell.paragraphs):
+        p._element.getparent().remove(p._element)
+    
+    # Process text to add line breaks after periods
+    processed_text = str(text or "").strip()
+    if not processed_text:
+        p = cell.add_paragraph()
+        r = p.add_run("")
+        r.font.color.rgb = BLACK
+        try:
+            r.font.color.theme_color = None
+        except Exception:
+            pass
+        return
+    
+    # Split on periods followed by space, but keep the period with the sentence
+    import re
+    sentences = re.split(r'(\.\s+)', processed_text)
+    
+    # Reconstruct sentences with periods
+    clean_sentences = []
+    for i in range(0, len(sentences), 2):
+        sentence = sentences[i]
+        if i + 1 < len(sentences) and sentences[i + 1].strip() == '.':
+            sentence += '.'
+        elif sentence.endswith('.'):
+            pass  # already has period
+        clean_sentences.append(sentence.strip())
+    
+    # Remove empty sentences
+    clean_sentences = [s for s in clean_sentences if s]
+    
+    if not clean_sentences:
+        p = cell.add_paragraph()
+        r = p.add_run(processed_text)
+        r.font.color.rgb = BLACK
+        try:
+            r.font.color.theme_color = None
+        except Exception:
+            pass
+        return
+    
+    # Add each sentence as a new paragraph with no spacing
+    for sentence in clean_sentences:
+        p = cell.add_paragraph()
+        # Remove paragraph spacing
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        
+        r = p.add_run(sentence)
+        r.font.color.rgb = BLACK
+        try:
+            r.font.color.theme_color = None
+        except Exception:
+            pass
 def _find_table_with_headers(doc: Document, must_have: list[str]) -> Optional[Table]:
     for t in doc.tables:
         if not t.rows: 
@@ -367,9 +426,10 @@ def fill_mass_vehicle_table_preserve_headers(table: Table, arrays: Dict[str, Lis
         put(row, "trip", "Trip Records", i)
         put(row, "frs",  "Fault Recording/ Reporting on Suspension System", i)
 
+# Modified function for Management Summary tables only
 def overwrite_summary_details_cells(doc: Document, section_name: str, section_dict: Dict[str, List[str]]) -> int:
     """For a Summary table (Maintenance/Mass/Fatigue), replace the entire DETAILS cell
-    for each Std N row with the JSON text (written in black)."""
+    for each Std N row with the JSON text (written in black with line breaks after periods)."""
     # build desired texts
     desired: Dict[str, str] = { _std_key(k): join_value(v) for k, v in section_dict.items() }
 
@@ -404,7 +464,8 @@ def overwrite_summary_details_cells(doc: Document, section_name: str, section_di
             if not cand:
                 continue
 
-            _set_cell_text_black(row.cells[details_col], cand)  # full overwrite, black
+            # Use the special function with line breaks for Management Summary tables
+            _set_cell_text_black_with_line_breaks(row.cells[details_col], cand)
             updated += 1
     return updated
 
@@ -483,34 +544,200 @@ def _set_text_and_black(run, new_text: str):
         pass
 
 def update_business_summary_once(doc: Document, value) -> bool:
-    """Replace only the red summary paragraph; keep 'Accreditation Number' and 'Expiry Date' lines."""
-    loc = (find_label_cell(doc, "Nature of the Operators Business (Summary)")
-           or find_label_cell(doc, "Nature of the Operators Business (Summary):"))
-    if not loc:
+    """
+    Independent handler for Nature of the Operators Business (Summary).
+    Completely bypasses other helper functions to avoid interference.
+    """
+    # Find the label cell
+    target_table = None
+    target_row = None
+    target_col = None
+    
+    for table in doc.tables:
+        for r_idx, row in enumerate(table.rows):
+            for c_idx, cell in enumerate(row.cells):
+                cell_text_content = ""
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        cell_text_content += run.text
+                
+                # Check if this is the Nature of business label
+                normalized = cell_text_content.strip().lower().replace(":", "")
+                if "nature of the operators business" in normalized and "summary" in normalized:
+                    target_table = table
+                    target_row = r_idx
+                    target_col = c_idx
+                    break
+            if target_table:
+                break
+        if target_table:
+            break
+    
+    if not target_table:
         return False
-
-    t, r, c = loc
-    cell = get_adjacent_value_cell(t, r, c)
-    if not cell.paragraphs:
-        cell.add_paragraph("")
-
-    txt = join_value(value)
-
-    # find paragraphs with any red runs (the placeholders for the summary)
-    red_paras = [p for p in cell.paragraphs if any(is_red_run(run) for run in p.runs)]
-
-    if red_paras:
-        # write the summary into the first red paragraph (in black)
-        _clear_para_and_write_black(red_paras[0], txt)
-        # clear any extra red placeholders
-        for p in red_paras[1:]:
-            _clear_para_and_write_black(p, "")
+    
+    # Get the value cell (usually to the right or below)
+    value_cell = None
+    if target_col + 1 < len(target_table.rows[target_row].cells):
+        # Try cell to the right
+        value_cell = target_table.rows[target_row].cells[target_col + 1]
+    elif target_row + 1 < len(target_table.rows):
+        # Try cell below
+        value_cell = target_table.rows[target_row + 1].cells[target_col]
     else:
-        # no red placeholder found: just put the summary into the first paragraph, leave others
-        _clear_para_and_write_black(cell.paragraphs[0], txt)
-
+        # Fallback to same cell
+        value_cell = target_table.rows[target_row].cells[target_col]
+    
+    if not value_cell:
+        return False
+    
+    # Get existing content to check for existing sub-labels (fix RGB color access)
+    existing_content = ""
+    for paragraph in value_cell.paragraphs:
+        for run in paragraph.runs:
+            # Better red color detection - avoid AttributeError
+            is_red = False
+            if run.font.color and run.font.color.rgb:
+                try:
+                    rgb = run.font.color.rgb
+                    # Use proper RGB color access
+                    if hasattr(rgb, '__iter__') and len(rgb) >= 3:
+                        r, g, b = rgb[0], rgb[1], rgb[2]
+                        is_red = r > 150 and g < 100 and b < 100
+                    else:
+                        # Alternative method for RGBColor objects
+                        r = (rgb >> 16) & 0xFF if hasattr(rgb, '__rshift__') else getattr(rgb, 'red', 0)
+                        g = (rgb >> 8) & 0xFF if hasattr(rgb, '__rshift__') else getattr(rgb, 'green', 0) 
+                        b = rgb & 0xFF if hasattr(rgb, '__and__') else getattr(rgb, 'blue', 0)
+                        is_red = r > 150 and g < 100 and b < 100
+                except:
+                    is_red = False
+            
+            if not is_red:
+                existing_content += run.text
+        existing_content += "\n"
+    existing_content = existing_content.strip()
+    
+    # Extract existing sub-labels if they exist
+    existing_acc = ""
+    existing_exp = ""
+    if existing_content:
+        import re
+        acc_match = re.search(r'Accreditation Number[:\s]*([^\n\r]+)', existing_content, re.IGNORECASE)
+        exp_match = re.search(r'Expiry Date[:\s]*([^\n\r]+)', existing_content, re.IGNORECASE)
+        
+        if acc_match:
+            existing_acc = acc_match.group(1).strip()
+        if exp_match:
+            existing_exp = exp_match.group(1).strip()
+    
+    # Process the JSON data
+    if isinstance(value, dict):
+        # Extract values from the dictionary
+        summary_text_raw = (value.get("Nature of the Operators Business (Summary)") or 
+                           value.get("Nature of the Operators Business (Summary):") or [])
+        expiry_date_raw = value.get("Expiry Date", [])
+        accreditation_number_raw = value.get("Accreditation Number", [])
+        
+        # Convert to strings
+        summary_text = ""
+        if isinstance(summary_text_raw, list) and summary_text_raw:
+            summary_text = str(summary_text_raw[0]).strip()
+        elif summary_text_raw:
+            summary_text = str(summary_text_raw).strip()
+        
+        expiry_date = ""
+        if isinstance(expiry_date_raw, list) and expiry_date_raw:
+            expiry_date = str(expiry_date_raw[0]).strip()
+        elif expiry_date_raw:
+            expiry_date = str(expiry_date_raw).strip()
+        
+        accreditation_number = ""
+        if isinstance(accreditation_number_raw, list) and accreditation_number_raw:
+            accreditation_number = str(accreditation_number_raw[0]).strip()
+        elif accreditation_number_raw:
+            accreditation_number = str(accreditation_number_raw).strip()
+        
+        print(f"DEBUG: summary_text='{summary_text}'")
+        print(f"DEBUG: expiry_date='{expiry_date}'")
+        print(f"DEBUG: accreditation_number='{accreditation_number}'")
+        print(f"DEBUG: existing_acc='{existing_acc}'")
+        print(f"DEBUG: existing_exp='{existing_exp}'")
+        
+        # Build the complete content
+        final_content = ""
+        
+        if summary_text:
+            final_content = summary_text
+        
+        # Determine which sub-labels to use (new from JSON or existing)
+        final_acc = accreditation_number if accreditation_number else existing_acc
+        final_exp = expiry_date if expiry_date else existing_exp
+        
+        print(f"DEBUG: final_acc='{final_acc}'")
+        print(f"DEBUG: final_exp='{final_exp}'")
+        
+        # Add sub-labels if any exist (new or preserved)
+        if final_acc or final_exp:
+            if final_content:
+                final_content += "\n\n"  # Add spacing before sub-labels
+            
+            if final_acc:
+                final_content += f"Accreditation Number: {final_acc}"
+                if final_exp:
+                    final_content += "\n"  # Add newline between sub-labels
+            
+            if final_exp:
+                final_content += f"Expiry Date: {final_exp}"
+        
+        print(f"DEBUG: final_content='{final_content}'")
+    
+    else:
+        # Handle simple string/list input
+        if isinstance(value, list):
+            final_content = " ".join(str(v) for v in value if v)
+        else:
+            final_content = str(value) if value else ""
+    
+    if not final_content:
+        return False
+    
+    # COMPLETELY CLEAR THE CELL AND REWRITE IT
+    # Remove all paragraphs except the first one
+    while len(value_cell.paragraphs) > 1:
+        p = value_cell.paragraphs[-1]
+        p._element.getparent().remove(p._element)
+    
+    # Clear the first paragraph completely
+    paragraph = value_cell.paragraphs[0]
+    for run in list(paragraph.runs):
+        run._element.getparent().remove(run._element)
+    
+    # Split the content into lines and handle each properly
+    lines = final_content.split('\n')
+    
+    # Write first line to existing paragraph
+    if lines:
+        first_run = paragraph.add_run(lines[0])
+        first_run.font.color.rgb = RGBColor(0, 0, 0)  # Black color
+        try:
+            first_run.font.color.theme_color = None
+        except:
+            pass
+    
+    # Add remaining lines as new paragraphs
+    for line in lines[1:]:
+        new_paragraph = value_cell.add_paragraph()
+        if line.strip():  # Non-empty line - add content
+            new_run = new_paragraph.add_run(line.strip())
+            new_run.font.color.rgb = RGBColor(0, 0, 0)  # Black color
+            try:
+                new_run.font.color.theme_color = None
+            except:
+                pass
+        # If line is empty, the paragraph remains empty, creating spacing
+    
     return True
-
 
 def _nuke_cell_paragraphs(cell: _Cell):
     """Remove ALL paragraphs from a cell (true delete, not just emptying runs)."""
@@ -530,18 +757,69 @@ def _clear_para_and_write_black(paragraph, text: str):
         pass
 
 def _set_cell_text_black(cell, text: str):
-    """Clear a table cell and insert black text."""
+    """Clear a table cell and insert black text with line breaks after periods."""
     # remove text from all runs in all paragraphs
     for p in cell.paragraphs:
         for r in p.runs:
             r.text = ""
+    
+    # Process text to add line breaks after periods
+    processed_text = str(text or "").strip()
+    if not processed_text:
+        p = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+        r = p.add_run("")
+        r.font.color.rgb = BLACK
+        try:
+            r.font.color.theme_color = None
+        except Exception:
+            pass
+        return
+    
+    # Split on periods followed by space, but keep the period with the sentence
+    import re
+    sentences = re.split(r'(\.\s+)', processed_text)
+    
+    # Reconstruct sentences with periods
+    clean_sentences = []
+    for i in range(0, len(sentences), 2):
+        sentence = sentences[i]
+        if i + 1 < len(sentences) and sentences[i + 1].strip() == '.':
+            sentence += '.'
+        elif sentence.endswith('.'):
+            pass  # already has period
+        clean_sentences.append(sentence.strip())
+    
+    # Remove empty sentences
+    clean_sentences = [s for s in clean_sentences if s]
+    
+    if not clean_sentences:
+        p = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+        r = p.add_run(processed_text)
+        r.font.color.rgb = BLACK
+        try:
+            r.font.color.theme_color = None
+        except Exception:
+            pass
+        return
+    
+    # Add first sentence to existing paragraph
     p = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
-    r = p.add_run(str(text or ""))
+    r = p.add_run(clean_sentences[0])
     r.font.color.rgb = BLACK
     try:
         r.font.color.theme_color = None
     except Exception:
         pass
+    
+    # Add remaining sentences as new paragraphs
+    for sentence in clean_sentences[1:]:
+        p = cell.add_paragraph()
+        r = p.add_run(sentence)
+        r.font.color.rgb = BLACK
+        try:
+            r.font.color.theme_color = None
+        except Exception:
+            pass
 
 def nz(x: Optional[str]) -> str:
     return (x or "").strip()
@@ -1143,9 +1421,7 @@ def run(input_json: Path, template_docx: Path, output_docx: Path):
     # 9) Nature of the Operators Business (Summary): write once (no duplicates)
     biz = data.get("Nature of the Operators Business (Summary)", {})
     if biz:
-        val = biz.get("Nature of the Operators Business (Summary):") or next(iter(biz.values()), "")
-        if val:
-            update_business_summary_once(doc, val)
+        update_business_summary_once(doc, biz)  # Pass the entire dictionary
 
     # 10) Summary tables: FULL OVERWRITE of DETAILS from JSON
     mm_sum = data.get("Maintenance Management Summary", {})

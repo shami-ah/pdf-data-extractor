@@ -510,32 +510,149 @@ class NHVASMerger:
     
     # ───────────────────────────── summary tables (unchanged logic) ─────────────────────────────
     def build_summary_maps(self, pdf_json: dict) -> dict:
+        """Enhanced summary mapping that correctly identifies detailed summary tables."""
         out = {v: {} for v in SUMMARY_SECTIONS.values()}
         try:
             tables = pdf_json["extracted_data"]["all_tables"]
         except Exception:
             return out
 
-        for t in tables:
+        self.log_debug(f"Processing {len(tables)} tables total")
+        
+        for i, t in enumerate(tables):
+            page = t.get("page", "?")
             headers = [re.sub(r"\s+", " ", (h or "")).strip().upper() for h in t.get("headers", [])]
-            if "DETAILS" not in headers:
+            if not headers:
                 continue
-            section_key_raw = next((h for h in headers if h in SUMMARY_SECTIONS), None)
-            if not section_key_raw:
+                
+            data_rows = t.get("data", [])
+            if not data_rows:
                 continue
-            section_name = SUMMARY_SECTIONS[section_key_raw]
-            for row in t.get("data", []):
-                if not row: continue
+            
+            self.log_debug(f"Table {i} (page {page}): headers = {headers[:5]}")
+            
+            # Check for DETAILS column - but be more flexible
+            table_header_text = " ".join(headers).upper()
+            has_details_column = "DETAILS" in table_header_text
+            
+            self.log_debug(f"  Has DETAILS column: {has_details_column}")
+            
+            if not has_details_column:
+                # Check if this might be a summary table without explicit "DETAILS" header
+                # Look for management type + detailed content
+                has_management_keyword = any(keyword in table_header_text for keyword in 
+                                        ["MAINTENANCE MANAGEMENT", "MASS MANAGEMENT", "FATIGUE MANAGEMENT"])
+                
+                if not has_management_keyword:
+                    self.log_debug(f"  Skipping - no DETAILS column and no management keywords")
+                    continue
+                else:
+                    self.log_debug(f"  No DETAILS column but has management keyword - checking content...")
+            
+            # Look for "Std X." patterns in the first column
+            has_standards = False
+            is_detailed_summary = False
+            section_type = None
+            sample_content = []
+            
+            for row in data_rows[:3]:  # Check first few rows
+                if not row:
+                    continue
+                first_cell = str(row[0]).strip()
+                if re.match(r"Std\s+\d+\.", first_cell, re.IGNORECASE):
+                    has_standards = True
+                    self.log_debug(f"  Found standard: {first_cell}")
+                    
+                    # Check all cells in this row for detailed content
+                    for i in range(1, len(row)):
+                        cell_content = str(row[i]).strip()
+                        if len(cell_content) > 50:  # Detailed content is much longer
+                            sample_content.append(cell_content[:200])  # Store sample for analysis
+                            if not re.match(r"^[VNC\s]*$", cell_content):
+                                is_detailed_summary = True
+                                self.log_debug(f"    Found detailed content: {cell_content[:100]}...")
+                            break
+            
+            self.log_debug(f"  Has standards: {has_standards}, Is detailed: {is_detailed_summary}")
+            
+            if not has_standards:
+                self.log_debug(f"  Skipping - no standards found")
+                continue
+                
+            if not is_detailed_summary:
+                self.log_debug(f"  Skipping - not detailed summary (content too short or just V/NC)")
+                continue
+                
+            # Identify management type from headers AND content
+            if "MAINTENANCE" in table_header_text:
+                section_type = "Maintenance Management Summary"
+            elif "MASS" in table_header_text:
+                section_type = "Mass Management Summary"  
+            elif "FATIGUE" in table_header_text:
+                section_type = "Fatigue Management Summary"
+            else:
+                # Fallback: analyze the actual standard content to determine type
+                combined_content = " ".join(sample_content).lower()
+                self.log_debug(f"  Analyzing content keywords: {combined_content[:200]}...")
+                
+                # Identify by content keywords
+                if any(keyword in combined_content for keyword in [
+                    "daily check", "fault", "maintenance", "repair", "service", "workshop"
+                ]):
+                    section_type = "Maintenance Management Summary"
+                    self.log_debug(f"    Identified as Maintenance by content")
+                elif any(keyword in combined_content for keyword in [
+                    "mass", "weight", "verification", "vehicle", "load", "gauge"
+                ]):
+                    section_type = "Mass Management Summary"
+                    self.log_debug(f"    Identified as Mass by content")
+                elif any(keyword in combined_content for keyword in [
+                    "fatigue", "scheduling", "rostering", "duty", "medical", "driver"
+                ]):
+                    section_type = "Fatigue Management Summary"
+                    self.log_debug(f"    Identified as Fatigue by content")
+            
+            if not section_type:
+                self.log_debug(f"  Could not determine section type for table with headers: {headers[:3]}")
+                continue
+                
+            self.log_debug(f"  ✅ Processing {section_type} table from page {page}")
+                
+            # Extract the data from the detailed content
+            standards_found = 0
+            for row in data_rows:
+                if not row:
+                    continue
                 left = str(row[0]) if len(row) >= 1 else ""
-                right = str(row[1]) if len(row) >= 2 else ""
+                
+                # Find the details content (longest cell in the row)
+                details_content = ""
+                for i in range(1, len(row)):
+                    cell_content = str(row[i]).strip()
+                    if len(cell_content) > len(details_content):
+                        details_content = cell_content
+                
                 left_norm = self.normalize_std_label(left)
-                if left_norm and right:
-                    prev = out[section_name].get(left_norm, "")
-                    merged_text = (prev + " " + right).strip() if prev else right.strip()
-                    out[section_name][left_norm] = merged_text
+                if left_norm and details_content and len(details_content) > 50:
+                    prev = out[section_type].get(left_norm, "")
+                    merged_text = (prev + " " + details_content).strip() if prev else details_content.strip()
+                    out[section_type][left_norm] = merged_text
+                    standards_found += 1
+                    self.log_debug(f"    Added {left_norm}: {details_content[:100]}...")
+            
+            self.log_debug(f"  Extracted {standards_found} standards from {section_type}")
 
+        # Convert to list format as expected by the rest of the code
         for sec in out:
             out[sec] = {k: [_smart_space(v)] for k, v in out[sec].items() if v}
+        
+        self.log_debug(f"Summary maps built: {list(out.keys())}")
+        for section_name, data in out.items():
+            if data:
+                self.log_debug(f"  ✅ {section_name}: {len(data)} standards found - {list(data.keys())[:3]}...")
+            else:
+                self.log_debug(f"  ❌ {section_name}: No data found")
+        
         return out
 
     # ───────────────────────────── NEW: find cell by label in tables ─────────────────────────────
@@ -1269,10 +1386,42 @@ class NHVASMerger:
             if op.get("phone"):
                 merged["Operator contact details"]["Operator Telephone Number"] = [_smart_space(op["phone"])]
 
-        # Attendance
+        # Attendance - Modified logic
         if "attendance" in pdf_extracted and "Attendance List (Names and Position Titles)" in merged:
-            merged["Attendance List (Names and Position Titles)"]["Attendance List (Names and Position Titles)"] = _clean_list(pdf_extracted["attendance"])
-
+            # Get expected count from DOCX template
+            docx_attendance = merged["Attendance List (Names and Position Titles)"]["Attendance List (Names and Position Titles)"]
+            expected_count = len(docx_attendance) if isinstance(docx_attendance, list) else 1
+            
+            # Get PDF attendance (already processed by existing extraction)
+            pdf_attendance_raw = pdf_extracted["attendance"]
+            
+            # The PDF might have combined entries like "Name1 - Position1 Name2 - Position2"
+            # Split them properly
+            separated_attendance = []
+            for entry in pdf_attendance_raw:
+                # Handle combined entries like "Grant Pontifex - Manager Jodie Jones - Auditor"
+                if " - " in entry:
+                    # Try to split by pattern: Position followed by Name
+                    import re
+                    # Look for pattern: Name - Position Name - Position
+                    match = re.search(r'([A-Z][a-z]+\s+[A-Z][a-z]+)\s*-\s*([A-Z][a-z]+)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)\s*-\s*([A-Z][a-z]+)', entry)
+                    if match:
+                        person1 = f"{match.group(1)} - {match.group(2)}"
+                        person2 = f"{match.group(3)} - {match.group(4)}"
+                        separated_attendance.extend([person1, person2])
+                    else:
+                        # If pattern doesn't match, keep as single entry
+                        separated_attendance.append(entry)
+                else:
+                    separated_attendance.append(entry)
+            
+            # Limit to expected count
+            final_attendance = separated_attendance[:expected_count]
+            
+            self.log_debug(f"Attendance: DOCX expects {expected_count}, PDF has {len(separated_attendance)}, using: {final_attendance}")
+            
+            merged["Attendance List (Names and Position Titles)"]["Attendance List (Names and Position Titles)"] = _clean_list(final_attendance)
+    
         # Business summary
         if "business_summary" in pdf_extracted and "Nature of the Operators Business (Summary)" in merged:
             merged["Nature of the Operators Business (Summary)"]["Nature of the Operators Business (Summary):"] = [_smart_space(pdf_extracted["business_summary"])]

@@ -5,6 +5,33 @@ import sys
 from docx import Document
 from docx.oxml.ns import qn
 from master_key import TABLE_SCHEMAS, HEADING_PATTERNS, PARAGRAPH_PATTERNS
+import unicodedata  # if not already imported
+
+MONTHS = r"(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)"
+DATE_RE = re.compile(rf"\b(\d{{1,2}})\s*(st|nd|rd|th)?\s+{MONTHS}\s+\d{{4}}\b", re.I)
+DATE_NUM_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
+
+# Inline sub-label regexes for Nature paragraph
+ACCRED_RE = re.compile(r"\bAccreditation\s*Number[:\s-]*([A-Za-z0-9\s/-]{2,})", re.I)
+EXPIRY_RE = re.compile(r"\bExpiry\s*Date[:\s-]*([A-Za-z0-9\s,/-]{2,})", re.I)
+
+# Parent name aliases to prevent Mass Management vs Mass Management Summary mismatches
+AMBIGUOUS_PARENTS = [
+    ("Mass Management Summary", "Mass Management"),
+    ("Mass Management", "Mass Management Summary"),
+]
+def get_red_text(cell):
+    reds = [r.text for p in cell.paragraphs for r in p.runs if is_red_font(r) and r.text]
+    reds = coalesce_numeric_runs(reds)
+    return normalize_text(" ".join(reds)) if reds else ""
+
+def _compact_digits(s: str) -> str:
+    # "5 1 0 6 6" -> "51066"
+    return re.sub(r"(?<=\d)\s+(?=\d)", "", s)
+
+def _fix_ordinal_space(s: str) -> str:
+    # "13 th" -> "13th"
+    return re.sub(r"\b(\d+)\s+(st|nd|rd|th)\b", r"\1\2", s, flags=re.I)
 
 def normalize_header_label(s: str) -> str:
     """Normalize a header/label by stripping parentheticals & punctuation."""
@@ -314,28 +341,47 @@ def calculate_schema_match_score(schema_name, spec, context):
     return score, reasons
 
 def match_table_schema(tbl):
-    """Improved table schema matching with scoring system"""
+    """Improved table schema matching with explicit Attendance/Operator/Auditor guards."""
     context = get_table_context(tbl)
-    # Auditor Declaration first
-    if ("print name" in " ".join(context.get("headers", [])).lower() and
-        "auditor" in " ".join(context.get("headers", [])).lower()):
+    heading_low = (context.get("heading") or "").strip().lower()
+    headers_norm = [normalize_header_label(h).lower() for h in context.get("headers", [])]
+
+    has_print    = any("print name" in h for h in headers_norm)
+    has_pos      = any(("position title" in h) or ("position" in h and "title" in h) for h in headers_norm)
+    has_namecol  = any(("name" in h) and ("print name" not in h) for h in headers_norm)
+    has_poscol   = any("position" in h for h in headers_norm)
+    has_aud_hint = any(("auditor" in h) or ("auditor registration" in h) for h in headers_norm)
+
+    # Force-guard: explicit headings
+    if "operator declaration" in heading_low and has_print and has_pos:
+        return "Operator Declaration"
+    if "auditor declaration" in heading_low and has_print:
         return "NHVAS Approved Auditor Declaration"
-    # NEW: prioritize Auditor Declaration to avoid misclassification
+    if ("attendance" in heading_low or "attendees" in heading_low) and has_namecol and has_poscol:
+        return "Attendance List (Names and Position Titles)"
+
+    # Priority: auditor if signature columns + auditor hints
+    if has_print and has_aud_hint:
+        return "NHVAS Approved Auditor Declaration"
+
+    # Classic 2-col signature table → Operator Declaration
+    if has_print and has_pos:
+        return "Operator Declaration"
+
+    # Heuristic fallbacks
     if looks_like_auditor_declaration(context):
         return "NHVAS Approved Auditor Declaration"
-    # hard-match Operator Declaration first (high priority, avoids misclassification)
     if looks_like_operator_declaration(context):
         return "Operator Declaration"
-    best_match = None
-    best_score = 0
+
+    # Score-based fallback
+    best_match, best_score = None, 0
     for name, spec in TABLE_SCHEMAS.items():
-        score, reasons = calculate_schema_match_score(name, spec, context)
+        score, _ = calculate_schema_match_score(name, spec, context)
         if score > best_score:
-            best_score = score
-            best_match = name
-    if best_score >= 20:
-        return best_match
-    return None
+            best_score, best_match = score, name
+    return best_match if best_score >= 20 else None
+
 
 def check_multi_schema_table(tbl):
     """Check if table contains multiple schemas and split appropriately"""
@@ -613,6 +659,81 @@ def extract_table_data(tbl, schema_name, spec):
             result.update({f"UNMAPPED::{k}": v for k, v in unmapped_bucket.items() if v})
         print(f"    ✅ Driver / Scheduler extracted: {len(result)} columns with data")
         return result
+    # ───────────────────────────────────────────────────────────────────────────
+    # ATTENDANCE LIST  (keep red-only; avoid duplicates; prefer whole-cell lines)
+    # ───────────────────────────────────────────────────────────────────────────
+    if "Attendance List" in schema_name:
+        items, seen = [], set()
+
+        # header sniff
+        hdr = [normalize_text(c.text).lower() for c in (tbl.rows[0].cells if tbl.rows else [])]
+        start_row = 1 if (any("name" in h for h in hdr) and any("position" in h for h in hdr)) else 0
+
+        for row in tbl.rows[start_row:]:
+            # collect red text from each cell
+            reds = [get_red_text(c) for c in row.cells]
+            reds = [r for r in reds if r]
+
+            if not reds:
+                continue
+
+            # if first cell already contains "Name - Position", use it as-is
+            if " - " in reds[0]:
+                entry = reds[0]
+            else:
+                # typical 2 columns: Name | Position
+                if len(reds) >= 2:
+                    entry = f"{reds[0]} - {reds[1]}"
+                else:
+                    entry = reds[0]
+
+            entry = normalize_text(entry)
+
+            # collapse accidental double-ups like "A - B - A - B"
+            parts = [p.strip() for p in entry.split(" - ") if p.strip()]
+            if len(parts) >= 4 and parts[:2] == parts[2:4]:
+                entry = " - ".join(parts[:2])
+
+            if entry and entry not in seen:
+                seen.add(entry)
+                items.append(entry)
+
+        return {schema_name: items} if items else {}
+
+        # ───────────────────────────────────────────────────────────────────────────
+    # ACCREDITATION VEHICLE SUMMARY (pairwise label/value per row)
+    # Expected labels in spec["labels"]:
+    #   ["Number of powered vehicles", "Number of trailing vehicles"]
+    # ───────────────────────────────────────────────────────────────────────────
+    if schema_name == "Accreditation Vehicle Summary":
+        labels = spec["labels"]
+        canonical_labels = {normalize_header_label(lbl).lower(): lbl for lbl in labels}
+        collected = {lbl: [] for lbl in labels}
+
+        def map_label(txt):
+            t = normalize_header_label(txt).lower()
+            if t in canonical_labels:
+                return canonical_labels[t]
+            # loose fallback
+            best, score = None, 0.0
+            for canon, original in canonical_labels.items():
+                s = bag_similarity(t, canon)
+                if s > score:
+                    best, score = original, s
+            return best if score >= 0.40 else None
+
+        for row in tbl.rows:
+            # iterate label/value pairs across the row: (0,1), (2,3), ...
+            i = 0
+            while i + 1 < len(row.cells):
+                lbl_txt = normalize_text(row.cells[i].text)
+                val_txt = get_red_text(row.cells[i + 1])
+                mlabel = map_label(lbl_txt)
+                if mlabel and val_txt:
+                    collected[mlabel].append(val_txt)
+                i += 2
+
+        return {k: v for k, v in collected.items() if v}
 
     # ───────────────────────────────────────────────────────────────────────────
     # C) Generic tables (unchanged: WITH dedupe)
@@ -661,6 +782,55 @@ def extract_table_data(tbl, schema_name, spec):
                 collected[lbl].append(red_txt)
 
     return {k: v for k, v in collected.items() if v}
+def _try_extract_nature_inline_labels(tbl, out_dict):
+    # Check context
+    prev = normalize_text(_prev_para_text(tbl)).lower()
+    if "nature of the operators business" not in prev:
+        return False
+
+    acc_val, exp_val, para_bits = None, None, []
+
+    for row in tbl.rows[1:]:
+        row_text = " ".join(normalize_text(c.text) for c in row.cells if c.text.strip())
+        if not row_text:
+            continue
+        low = row_text.lower()
+
+        def _red_from_row():
+            vals = []
+            for c in row.cells:
+                for p in c.paragraphs:
+                    reds = [r.text for r in p.runs if is_red_font(r) and r.text.strip()]
+                    if reds:
+                        vals.extend(reds)
+            return normalize_text(" ".join(coalesce_numeric_runs(vals)))
+
+        if low.startswith("accreditation number"):
+            v = _red_from_row() or normalize_text(row_text.split(":", 1)[-1])
+            acc_val = _compact_digits(v) if v else acc_val
+            continue
+
+        if low.startswith("expiry date"):
+            v = _red_from_row() or normalize_text(row_text.split(":", 1)[-1])
+            exp_val = _fix_ordinal_space(v) if v else exp_val
+            continue
+
+        # otherwise narrative line
+        para_bits.append(row_text)
+
+    if not (para_bits or acc_val or exp_val):
+        return False
+
+    sec = out_dict.setdefault("Nature of the Operators Business (Summary)", {})
+    if para_bits:
+        sec.setdefault("Nature of the Operators Business (Summary):", []).append(
+            normalize_text(" ".join(para_bits))
+        )
+    if acc_val:
+        sec.setdefault("Accreditation Number", []).append(acc_val)
+    if exp_val:
+        sec.setdefault("Expiry Date", []).append(exp_val)
+    return True
 
 def extract_red_text(input_doc):
     # input_doc: docx.Document object or file path
@@ -672,6 +842,9 @@ def extract_red_text(input_doc):
     table_count = 0
     for tbl in doc.tables:
         table_count += 1
+        # Nature-of-business inline labels, if present as table rows
+        if _try_extract_nature_inline_labels(tbl, out):
+            continue
         multi_schemas = check_multi_schema_table(tbl)
         if multi_schemas:
             multi_data = extract_multi_schema_table(tbl, multi_schemas)
@@ -729,6 +902,96 @@ def extract_red_text(input_doc):
         op_dec = extract_operator_declaration_by_headers_from_end(doc)
         if op_dec:
             out["Operator Declaration"] = op_dec
+
+    # —— Handle ambiguous parents without creating unwanted duplicates ——
+    # Only create aliases for legitimately different content, not summary tables
+    summary_sections = {k for k in out.keys() if "Summary" in k}
+    
+    processed_pairs = set()
+    for a, b in AMBIGUOUS_PARENTS:
+        pair_key = tuple(sorted([a, b]))
+        if pair_key in processed_pairs:
+            continue
+        processed_pairs.add(pair_key)
+        
+        # Skip if one is a Summary table and the other isn't - these should remain separate
+        if ("Summary" in a) != ("Summary" in b):
+            continue
+            
+        if a in out and b in out:
+            # Both exist - check if they have identical content
+            if out[a] == out[b]:
+                # Remove the duplicate (prefer Summary version if available)
+                to_remove = b if "Summary" in a else a
+                del out[to_remove]
+        elif a in out and b not in out:
+            # Only create alias if not a summary table and names are different
+            if a != b and "Summary" not in a and len(out[a]) > 1:
+                out[b] = out[a]
+        elif b in out and a not in out:
+            # Only create alias if not a summary table and names are different
+            if a != b and "Summary" not in b and len(out[b]) > 1:
+                out[a] = out[b]
+
+    # —— add Accreditation Number and Expiry Date from Nature paragraph (do NOT edit the paragraph) ——
+    for sec_key, section in list(out.items()):
+        if not isinstance(section, dict):
+            continue
+        if re.fullmatch(r"Nature of the Operators Business \(Summary\)", sec_key, flags=re.I):
+            # find the main paragraph field "...(Summary):"
+            para_field = None
+            for k in section.keys():
+                if re.search(r"\(Summary\):\s*$", k):
+                    para_field = k
+                    break   # <- break only when found
+            if not para_field:
+                continue
+
+            raw = section.get(para_field)
+            if isinstance(raw, list):
+                para = " ".join(str(x) for x in raw)
+            else:
+                para = str(raw or "")
+
+            m_acc = ACCRED_RE.search(para)
+            m_exp = EXPIRY_RE.search(para)
+
+            # labeled matches
+            if m_acc:
+                v = _compact_digits(_fix_ordinal_space(normalize_text(m_acc.group(1))))
+                if v:
+                    section.setdefault("Accreditation Number", []).append(v)
+            if m_exp:
+                v = _compact_digits(_fix_ordinal_space(normalize_text(m_exp.group(1))))
+                if v:
+                    section.setdefault("Expiry Date", []).append(v)
+
+            # fallback when labels are missing but values appear at the end
+            acc_missing = not section.get("Accreditation Number")
+            exp_missing = not section.get("Expiry Date")
+
+            if acc_missing or exp_missing:
+                # find the last date-like token (wordy month or numeric)
+                last_date_match = None
+                for md in DATE_RE.finditer(para):
+                    last_date_match = md
+                if not last_date_match:
+                    for md in DATE_NUM_RE.finditer(para):
+                        last_date_match = md
+
+                if last_date_match:
+                    if exp_missing:
+                        date_txt = _fix_ordinal_space(last_date_match.group(0))
+                        section.setdefault("Expiry Date", []).append(normalize_text(date_txt))
+
+                    if acc_missing:
+                        # take digits immediately before the date
+                        before = para[: last_date_match.start()]
+                        m_num = re.search(r"(\d[\d\s]{3,12})\s*$", before)
+                        if m_num:
+                            num_txt = _compact_digits(normalize_text(m_num.group(1)))
+                            if num_txt:
+                                section.setdefault("Accreditation Number", []).append(num_txt)
 
     return out
 
