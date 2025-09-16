@@ -1139,25 +1139,81 @@ class NHVASMerger:
             elif "mass" in txt: extracted["mass_compliance"] = comp
             elif "fatigue" in txt: extracted["fatigue_compliance"] = comp
 
-    def _extract_text_content(self, text_pages: List[Dict], extracted: Dict):
+    def _extract_text_content(self, text_pages: List[Dict], extracted: Dict) -> None:
         all_text = " ".join(page.get("text", "") for page in text_pages)
         all_text = _smart_space(all_text)
 
-        # business summary
-        patt = [
-            r"Nature of the Operators? Business.*?:\s*(.*?)(?:Accreditation Number|Expiry Date|$)",
-            r"Nature of.*?Business.*?Summary.*?:\s*(.*?)(?:Accreditation|$)"
-        ]
-        for p in patt:
-            m = re.search(p, all_text, re.IGNORECASE | re.DOTALL)
-            if m:
-                txt = re.sub(r'\s+', ' ', m.group(1).strip())
-                txt = re.sub(r'\s*(Accreditation Number.*|Expiry Date.*)', '', txt, flags=re.IGNORECASE)
-                if len(txt) > 50:
-                    extracted["business_summary"] = txt
-                    break
+        # ------- Nature of business (positional, robust to collapsed newlines) ----------
+        heading_rx = re.compile(r"(Nature of the Operators? Business(?:\s*\(Summary\))?\s*[:\-]?)", flags=re.I)
+        start_m = heading_rx.search(all_text)
+        if start_m:
+            start_idx = start_m.end()
 
-        # audit conducted date
+            # Stop phrases (no newlines). Use word boundaries where appropriate so we don't
+            # accidentally cut on substrings inside words.
+            stop_phrases = [
+                r"\bAccreditation Vehicle Summary\b",
+                r"\bACCREDITATION VEHICLE SUMMARY\b",
+                r"\bAUDIT OBSERVATIONS\b",
+                r"\bNHVAS AUDIT SUMMARY REPORT\b",
+                r"\bPage\s+\d+\s+of\s+\d+\b",
+                r"\bVehicle Registration Numbers\b",
+                r"\bVehicle Registration Numbers of Records Examined\b",
+                r"\bAUDIT SUMMARY REPORT\b",
+            ]
+
+            # Find earliest occurrence of any stop phrase after the heading
+            next_idx = None
+            for sp in stop_phrases:
+                m = re.search(sp, all_text[start_idx:], flags=re.I)
+                if m:
+                    idx = start_idx + m.start()
+                    if next_idx is None or idx < next_idx:
+                        next_idx = idx
+
+            # Slice from end of heading to earliest stop phrase (or limit to a reasonable length)
+            end_idx = next_idx if next_idx is not None else min(len(all_text), start_idx + 4000)
+            candidate = all_text[start_idx:end_idx].strip()
+
+            # Defensive trimming of trailing uppercase boilerplate or table header noise
+            candidate = re.sub(
+                r"(ACCREDITATION VEHICLE SUMMARY|AUDIT OBSERVATIONS|NHVAS AUDIT SUMMARY REPORT|STD\s+\d+\.).*$",
+                "",
+                candidate,
+                flags=re.I | re.DOTALL,
+            )
+            candidate = re.sub(r"\s+", " ", candidate).strip()
+
+            if 20 < len(candidate) < 5000:
+                extracted["business_summary"] = candidate
+
+                # Extract Accreditation Number / Expiry only if they appear inline in this small block
+                m_acc = re.search(r"\bAccreditation\s*Number[:\s-]*([A-Za-z0-9\s\-\/]+)", candidate, flags=re.I)
+                m_exp = re.search(r"\bExpiry\s*Date[:\s-]*([A-Za-z0-9\s,\/\-]+)", candidate, flags=re.I)
+                if m_acc:
+                    acc = re.sub(r"\s+", " ", m_acc.group(1)).strip()
+                    acc = re.sub(r"[^\d]", "", acc) or acc
+                    extracted.setdefault("business_summary_extras", {})["accreditation_number"] = acc
+                if m_exp:
+                    exp = _fix_ocr_date_noise(m_exp.group(1).strip())
+                    extracted.setdefault("business_summary_extras", {})["expiry_date"] = _smart_space(exp)
+
+        # --- fallback (preserve previous behaviour for other templates) ---
+        if "business_summary" not in extracted:
+            patt = [
+                r"Nature of the Operators? Business.*?:\s*(.*?)(?:Accreditation Number|Expiry Date|$)",
+                r"Nature of.*?Business.*?Summary.*?:\s*(.*?)(?:Accreditation|$)"
+            ]
+            for p in patt:
+                m = re.search(p, all_text, re.IGNORECASE | re.DOTALL)
+                if m:
+                    txt = re.sub(r'\s+', ' ', m.group(1).strip())
+                    txt = re.sub(r'\s*(Accreditation Number.*|Expiry Date.*)', '', txt, flags=re.IGNORECASE)
+                    if len(txt) > 50:
+                        extracted["business_summary"] = txt
+                        break
+
+        # --- audit conducted date (unchanged) ---
         for p in [
             r"Audit was conducted on\s+([0-9]+(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4})",
             r"DATE\s+([0-9]+(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4})",
@@ -1168,7 +1224,7 @@ class NHVASMerger:
                 extracted["audit_conducted_date"] = _smart_space(m.group(1).strip())
                 break
 
-        # print accreditation name
+        # --- print accreditation name (unchanged) ---
         for p in [
             r"\(print accreditation name\)\s*([A-Za-z0-9\s&().,'/\-]+?)(?:\s+DOES|\s+does|\n|$)",
             r"print accreditation name.*?\n\s*([A-Za-z0-9\s&().,'/\-]+?)(?:\s+DOES|\s+does|\n|$)"
@@ -1178,7 +1234,7 @@ class NHVASMerger:
                 extracted["print_accreditation_name"] = _smart_space(m.group(1).strip())
                 break
 
-        # numbers in text (optional)
+        # --- Vehicle/driver simple numbers (unchanged) ---
         for p in [
             r"Number of powered vehicles\s+(\d+)",
             r"powered vehicles\s+(\d+)",
@@ -1190,9 +1246,12 @@ class NHVASMerger:
             m = re.search(p, all_text, re.IGNORECASE)
             if m:
                 val = m.group(1)
-                if "powered" in p: extracted.setdefault("vehicle_summary", {})["powered_vehicles"] = val
-                elif "trailing" in p: extracted.setdefault("vehicle_summary", {})["trailing_vehicles"] = val
-                elif "bfm" in p.lower(): extracted.setdefault("vehicle_summary", {})["drivers_bfm"] = val
+                if "powered" in p:
+                    extracted.setdefault("vehicle_summary", {})["powered_vehicles"] = val
+                elif "trailing" in p:
+                    extracted.setdefault("vehicle_summary", {})["trailing_vehicles"] = val
+                elif "bfm" in p.lower():
+                    extracted.setdefault("vehicle_summary", {})["drivers_bfm"] = val
 
     def _extract_detailed_management_data(self, extracted_data: Dict, extracted: Dict):
         all_tables = extracted_data.get("all_tables", [])

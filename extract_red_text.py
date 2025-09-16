@@ -11,9 +11,9 @@ MONTHS = r"(January|February|March|April|May|June|July|August|September|October|
 DATE_RE = re.compile(rf"\b(\d{{1,2}})\s*(st|nd|rd|th)?\s+{MONTHS}\s+\d{{4}}\b", re.I)
 DATE_NUM_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
 
-# Inline sub-label regexes for Nature paragraph
-ACCRED_RE = re.compile(r"\bAccreditation\s*Number[:\s-]*([A-Za-z0-9\s/-]{2,})", re.I)
-EXPIRY_RE = re.compile(r"\bExpiry\s*Date[:\s-]*([A-Za-z0-9\s,/-]{2,})", re.I)
+# permissive inline label regexes — allow OCR-space noise and varied punctuation
+ACCRED_RE = re.compile(r"\bAccreditation\s*Number[:\s\-–:]*([A-Za-z0-9\s\.\-/,]{2,})", re.I)
+EXPIRY_RE = re.compile(r"\bExpiry\s*Date[:\s\-–:]*([A-Za-z0-9\s\.\-/,]{2,})", re.I)
 
 # Parent name aliases to prevent Mass Management vs Mass Management Summary mismatches
 AMBIGUOUS_PARENTS = [
@@ -903,35 +903,51 @@ def extract_red_text(input_doc):
         if op_dec:
             out["Operator Declaration"] = op_dec
 
-    # —— Handle ambiguous parents without creating unwanted duplicates ——
-    # Only create aliases for legitimately different content, not summary tables
-    summary_sections = {k for k in out.keys() if "Summary" in k}
-    
-    processed_pairs = set()
-    for a, b in AMBIGUOUS_PARENTS:
-        pair_key = tuple(sorted([a, b]))
-        if pair_key in processed_pairs:
-            continue
-        processed_pairs.add(pair_key)
-        
-        # Skip if one is a Summary table and the other isn't - these should remain separate
-        if ("Summary" in a) != ("Summary" in b):
-            continue
-            
-        if a in out and b in out:
-            # Both exist - check if they have identical content
-            if out[a] == out[b]:
-                # Remove the duplicate (prefer Summary version if available)
-                to_remove = b if "Summary" in a else a
-                del out[to_remove]
-        elif a in out and b not in out:
-            # Only create alias if not a summary table and names are different
-            if a != b and "Summary" not in a and len(out[a]) > 1:
-                out[b] = out[a]
-        elif b in out and a not in out:
-            # Only create alias if not a summary table and names are different
-            if a != b and "Summary" not in b and len(out[b]) > 1:
-                out[a] = out[b]
+        # —— Handle ambiguous parents without creating unwanted duplicates ——
+        # Prefer the "Summary" variant when both keys derive from the same Std-style content.
+        summary_pairs = [
+            ("Mass Management Summary", "Mass Management"),
+            ("Maintenance Management Summary", "Maintenance Management"),
+            ("Fatigue Management Summary", "Fatigue Management"),
+        ]
+
+        for summary_key, alt_key in summary_pairs:
+            # if only alt exists, consider promoting it to the summary name
+            if alt_key in out and summary_key not in out:
+                # only promote if the alt content looks like a standards/details map
+                alt_section = out.get(alt_key)
+                if isinstance(alt_section, dict) and any(k.strip().startswith("Std") for k in alt_section.keys()):
+                    out[summary_key] = alt_section
+                    del out[alt_key]
+                    continue
+
+            # if both exist, merge alt into summary (avoiding duplicates)
+            if summary_key in out and alt_key in out:
+                s = out[summary_key] or {}
+                a = out[alt_key] or {}
+                # Only auto-merge when both are dicts and look like Std mappings (safe heuristic)
+                if isinstance(s, dict) and isinstance(a, dict) and \
+                (any(k.strip().startswith("Std") for k in s.keys()) or any(k.strip().startswith("Std") for k in a.keys())):
+                    for k, v in a.items():
+                        if not v:
+                            continue
+                        if k in s:
+                            # append unique items
+                            if isinstance(s[k], list) and isinstance(v, list):
+                                for item in v:
+                                    if item not in s[k]:
+                                        s[k].append(item)
+                            else:
+                                # fallback: convert to lists
+                                s.setdefault(k, [])
+                                for item in (v if isinstance(v, list) else [v]):
+                                    if item not in s[k]:
+                                        s[k].append(item)
+                        else:
+                            s[k] = v if isinstance(v, list) else [v]
+                    out[summary_key] = s
+                    # remove the alt key to avoid duplicate sections
+                    del out[alt_key]
 
     # —— add Accreditation Number and Expiry Date from Nature paragraph (do NOT edit the paragraph) ——
     for sec_key, section in list(out.items()):
@@ -966,32 +982,123 @@ def extract_red_text(input_doc):
                 if v:
                     section.setdefault("Expiry Date", []).append(v)
 
-            # fallback when labels are missing but values appear at the end
+                        # fallback when labels are missing but values appear at the end
             acc_missing = not section.get("Accreditation Number")
             exp_missing = not section.get("Expiry Date")
 
             if acc_missing or exp_missing:
-                # find the last date-like token (wordy month or numeric)
+                # 1) Try to find the last date-like token (wordy month or numeric)
                 last_date_match = None
-                for md in DATE_RE.finditer(para):
+                # prefer textual month matches (allowing OCR noise like "22 nd September 2023" or "202 3")
+                month_rx = re.compile(rf"\b\d{{1,2}}\s*(?:st|nd|rd|th)?\s+{MONTHS}\s+\d{{2,4}}\b", re.I)
+                for md in month_rx.finditer(para):
                     last_date_match = md
+                # fallback numeric date forms (dd/mm/yyyy or dd-mm-yyyy)
+                if not last_date_match:
+                    for md in DATE_RE.finditer(para):
+                        last_date_match = md
                 if not last_date_match:
                     for md in DATE_NUM_RE.finditer(para):
                         last_date_match = md
 
+                # 2) If we found a candidate expiry date, normalise and use it
                 if last_date_match:
+                    date_txt = last_date_match.group(0)
+                    # fix noisy ordinals/spacing and collapsed digit noise (e.g., "202 3" -> "2023")
+                    date_txt = _fix_ordinal_space(date_txt)
+                    date_txt = re.sub(r"\b(20)\s?(\d{2})\b", r"\1\2", date_txt)
+                    date_txt = re.sub(r"\b(19)\s?(\d{2})\b", r"\1\2", date_txt)
                     if exp_missing:
-                        date_txt = _fix_ordinal_space(last_date_match.group(0))
                         section.setdefault("Expiry Date", []).append(normalize_text(date_txt))
 
+                    # 3) If accreditation is missing, try to extract digits immediately *before* the date
                     if acc_missing:
-                        # take digits immediately before the date
-                        before = para[: last_date_match.start()]
-                        m_num = re.search(r"(\d[\d\s]{3,12})\s*$", before)
+                        before = para[: last_date_match.start()].strip()
+                        # look for long digit run (allow spaces between digits)
+                        m_num = re.search(r"(\d[\d\s]{3,16}\d)\s*$", before)
                         if m_num:
                             num_txt = _compact_digits(normalize_text(m_num.group(1)))
                             if num_txt:
                                 section.setdefault("Accreditation Number", []).append(num_txt)
+
+                # 4) If we still didn't find an accreditation number, try scanning entire paragraph for the longest digit run
+                if acc_missing:
+                    # collect digit-like tokens, collapse internal spaces and pick the longest
+                    digit_tokens = [ _compact_digits(t) for t in re.findall(r"[\d\s]{4,}", para) ]
+                    digit_tokens = [d for d in digit_tokens if len(re.sub(r'\D','',d)) >= 5]  # require >=5 digits
+                    if digit_tokens:
+                        # choose the longest / most plausible digits (deterministic)
+                        digit_tokens.sort(key=lambda s: (-len(re.sub(r'\D','',s)), s))
+                        section.setdefault("Accreditation Number", []).append(digit_tokens[0])
+
+                # 5) If expiry still missing, do a broad textual month search anywhere in the paragraph
+                if exp_missing:
+                    broad_month_rx = re.compile(rf"\b\d{{1,2}}\s*(?:st|nd|rd|th)?\s+{MONTHS}\s+\d{{2,4}}\b|\b{MONTHS}\s+\d{{2,4}}\b", re.I)
+                    md_any = list(broad_month_rx.finditer(para))
+                    if md_any:
+                        candidate = md_any[-1].group(0)
+                        candidate = _fix_ordinal_space(candidate)
+                        candidate = re.sub(r"\b(20)\s?(\d{2})\b", r"\1\2", candidate)
+                        if candidate:
+                            section.setdefault("Expiry Date", []).append(normalize_text(candidate))
+
+
+    # —— STRONGER: canonicalise & merge "X Summary" <-> "X" variants (case-insensitive) ——
+    def _base_name(k: str) -> str:
+        # remove trailing "summary" and punctuation, normalise spaces
+        if not isinstance(k, str):
+            return ""
+        b = re.sub(r"[\(\)\[\]\:]+", " ", k)
+        b = re.sub(r"\bsummary\b\s*[:\-]*", "", b, flags=re.I)
+        b = re.sub(r"\s+", " ", b).strip().lower()
+        return b
+
+    # Build index: base -> list of original keys
+    base_index = {}
+    for key in list(out.keys()):
+        base = _base_name(key)
+        if not base:
+            continue
+        base_index.setdefault(base, []).append(key)
+
+    # For each base that maps to >1 key, merge into the Summary-preferring canonical key
+    for base, keys in base_index.items():
+        if len(keys) < 2:
+            continue
+        # prefer a key that explicitly contains 'summary' (case-insensitive)
+        canonical = None
+        for k in keys:
+            if re.search(r"\bsummary\b", k, re.I):
+                canonical = k
+                break
+        # else pick the lexicographically first (deterministic)
+        canonical = canonical or sorted(keys, key=lambda s: s.lower())[0]
+
+        # merge everything else into canonical
+        for k in keys:
+            if k == canonical:
+                continue
+            src = out.get(k)
+            dst = out.get(canonical)
+            # only merge dict-like Std mappings (safe-guard)
+            if isinstance(dst, dict) and isinstance(src, dict):
+                for std_key, vals in src.items():
+                    if not vals:
+                        continue
+                    if std_key in dst:
+                        # append unique items preserving order
+                        for v in vals if isinstance(vals, list) else [vals]:
+                            if v not in dst[std_key]:
+                                dst[std_key].append(v)
+                    else:
+                        dst[std_key] = list(vals) if isinstance(vals, list) else [vals]
+                out[canonical] = dst
+                # remove source key
+                del out[k]
+            else:
+                # If not both dicts, prefer keeping canonical and drop duplicates conservatively
+                if k in out:
+                    del out[k]
 
     return out
 

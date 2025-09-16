@@ -428,45 +428,159 @@ def fill_mass_vehicle_table_preserve_headers(table: Table, arrays: Dict[str, Lis
 
 # Modified function for Management Summary tables only
 def overwrite_summary_details_cells(doc: Document, section_name: str, section_dict: Dict[str, List[str]]) -> int:
-    """For a Summary table (Maintenance/Mass/Fatigue), replace the entire DETAILS cell
-    for each Std N row with the JSON text (written in black with line breaks after periods)."""
-    # build desired texts
+    """
+    Overwrite Summary table DETAILS cells robustly, with a strict fallback that
+    prefers rows whose DETAILS cell looks like a real sentence (not 'V'/'NC' markers).
+    """
     desired: Dict[str, str] = { _std_key(k): join_value(v) for k, v in section_dict.items() }
+    desired_orig = { _std_key(k): canon_label(k) for k in section_dict.keys() }
+    wanted_prefix = canon_label(section_name.split()[0])
 
-    # pick which tables belong to this section by header sniff
-    wanted_prefix = canon_label(section_name.split()[0])  # "maintenance" | "mass" | "fatigue"
-
+    tables = list(doc.tables)
     updated = 0
-    for t in doc.tables:
+    matched_keys = set()
+    matched_positions = {}
+
+    def is_sentencey(s: str) -> bool:
+        s = re.sub(r"\s+", " ", (s or "").strip())
+        # short guard: require some letters and reasonable length
+        return bool(s) and len(s) >= 20 and re.search(r"[A-Za-z]", s)
+
+    # 1) Prefer headered summary tables that match the section prefix
+    for t_index, t in enumerate(tables):
         cols = _looks_like_summary_table(t)
         if not cols:
             continue
         label_col, details_col = cols
-
         head_txt = table_header_text(t, up_to_rows=2)
-        if wanted_prefix not in head_txt:   # keep to the correct section
-            continue
+        if wanted_prefix not in head_txt:
+            # still allow headered tables, but prefer ones with section prefix
+            # (we do not skip entirely because some docs are inconsistent)
+            pass
 
-        # walk body rows
-        for i in range(1, len(t.rows)):
-            row = t.rows[i]
-            key = _std_key(cell_text(row.cells[label_col]))
+        hdr_rows = count_header_rows(t, scan_up_to=6)
+        for row_idx in range(hdr_rows, len(t.rows)):
+            row = t.rows[row_idx]
+            if label_col >= len(row.cells):
+                continue
+            left_text = cell_text(row.cells[label_col]).strip()
+            if not left_text:
+                continue
+            left_norm = canon_label(left_text)
 
-            # exact match or "std N" prefix match
-            cand = desired.get(key)
-            if not cand:
-                m = re.match(r"(std\s+\d+)", key)
+            # exact std number match
+            mstd = re.search(r"\bstd[\s\.]*?(\d{1,2})\b", left_norm, flags=re.I)
+            cand_key = None
+            if mstd:
+                k = f"std {int(mstd.group(1))}"
+                if k in desired:
+                    cand_key = k
+            # exact normalized label match
+            if not cand_key and left_norm in desired:
+                cand_key = left_norm
+            # prefix match (std N prefix)
+            if not cand_key:
+                m = re.match(r"(std\s+\d+)", left_norm)
                 if m:
-                    for k2, v2 in desired.items():
-                        if k2.startswith(m.group(1)):
-                            cand = v2
+                    pre = m.group(1)
+                    for k2 in desired.keys():
+                        if k2.startswith(pre):
+                            cand_key = k2
                             break
-            if not cand:
+            # containment / orig label fuzzy
+            if not cand_key:
+                for k2, orig in desired_orig.items():
+                    if orig and (orig in left_norm or left_norm in orig):
+                        cand_key = k2
+                        break
+
+            if not cand_key:
+                # debug
+                print(f"[DEBUG] table#{t_index} row#{row_idx} left='{left_text}' -> NO CANDIDATE")
                 continue
 
-            # Use the special function with line breaks for Management Summary tables
-            _set_cell_text_black_with_line_breaks(row.cells[details_col], cand)
+            # ensure details_col exists, fallback to next cell
+            use_details = details_col if details_col < len(row.cells) else (label_col+1 if label_col+1 < len(row.cells) else len(row.cells)-1)
+            existing_details = cell_text(row.cells[use_details]).strip() if use_details < len(row.cells) else ""
+            # write regardless, but mark matched
+            print(f"[DEBUG] table#{t_index} row#{row_idx} left='{left_text}' matched_key={cand_key} -> updating details_col={use_details}")
+            _set_cell_text_black_with_line_breaks(row.cells[use_details], desired[cand_key])
+            matched_keys.add(cand_key)
+            matched_positions[cand_key] = (t_index, row_idx)
             updated += 1
+
+    # 2) Strict fragment fallback: for any still-missing std, find the best row across ALL tables
+    missing = [k for k in desired.keys() if k not in matched_keys]
+    if missing:
+        print(f"[DEBUG] Strict fallback for missing keys: {missing}")
+
+    for k in missing:
+        best_candidate = None
+        best_score = -1
+        orig_label = desired_orig.get(k, k)
+
+        # search all rows in all tables for a row whose left cell contains the label/std and whose
+        # details cell contains sentence-length text. choose best by longest details length.
+        for t_index, t in enumerate(tables):
+            # candidate may have label in any column (some fragments are odd)
+            for row_idx, row in enumerate(t.rows):
+                for c_idx, cell in enumerate(row.cells):
+                    left_cell_text = cell_text(cell).strip()
+                    if not left_cell_text:
+                        continue
+                    left_norm = canon_label(left_cell_text)
+
+                    found_label = False
+                    # numeric std match
+                    mstd = re.search(r"\bstd[\s\.]*?(\d{1,2})\b", left_norm, flags=re.I)
+                    if mstd:
+                        if f"std {int(mstd.group(1))}" == k:
+                            found_label = True
+                    # normalized containment
+                    if not found_label and orig_label and (orig_label in left_norm or left_norm in orig_label):
+                        found_label = True
+
+                    if not found_label:
+                        continue
+
+                    # determine details cell index: prefer next cell, otherwise last cell
+                    details_idx = c_idx + 1 if (c_idx + 1) < len(row.cells) else (len(row.cells) - 1)
+                    details_text = cell_text(row.cells[details_idx]).strip() if details_idx < len(row.cells) else ""
+                    score = len(details_text)
+                    sentencey = is_sentencey(details_text) or is_sentencey(left_cell_text)
+
+                    # boost sentencey rows heavily
+                    if sentencey:
+                        score += 10000
+
+                    # prefer tables whose header contains the wanted_prefix (if header present)
+                    cols = _looks_like_summary_table(t)
+                    if cols:
+                        head_txt = table_header_text(t, up_to_rows=2)
+                        if wanted_prefix in head_txt:
+                            score += 500
+
+                    # avoid writing into rows where the details are tiny markers only
+                    if re.fullmatch(r"^[^\w]{0,2}\w?$", details_text):
+                        # penalize strongly
+                        score -= 5000
+
+                    if score > best_score:
+                        best_score = score
+                        best_candidate = (t_index, row_idx, details_idx, left_cell_text, details_text)
+
+        if best_candidate and best_score > 0:
+            t_index, row_idx, details_idx, ltxt, dtxt = best_candidate
+            print(f"[DEBUG-FB] matched missing key {k} -> table#{t_index} row#{row_idx} left='{ltxt}' details_len={len(dtxt)}")
+            t = tables[t_index]
+            _set_cell_text_black_with_line_breaks(t.rows[row_idx].cells[details_idx], desired[k])
+            updated += 1
+            matched_keys.add(k)
+            matched_positions[k] = (t_index, row_idx)
+        else:
+            print(f"[DEBUG-FB] no suitable sentencey candidate found for {k}; skipping.")
+
+    print(f"[DEBUG] overwrite_summary_details_cells: total updated = {updated}")
     return updated
 
 SPLIT_SENT_PAT = re.compile(r"(?<=\.|\?|!)\s+")
